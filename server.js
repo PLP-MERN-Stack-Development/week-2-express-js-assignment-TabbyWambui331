@@ -1,71 +1,109 @@
-// server.js - Starter Express server for Week 2 assignment
-
-// Import required modules
 const express = require('express');
-const bodyParser = require('body-parser');
-const { v4: uuidv4 } = require('uuid');
+const dotenv = require('dotenv');
+const productRoutes = require('./routes/productRoutes');
+const logger = require('./middleware/logger');
+const errorHandler = require('./middleware/errorHandler');
 
-// Initialize Express app
 const app = express();
-const PORT = process.env.PORT || 3000;
+dotenv.config();
 
-// Middleware setup
-app.use(bodyParser.json());
+// Middleware
+app.use(express.json());
+app.use(logger);
 
-// Sample in-memory products database
-let products = [
-  {
-    id: '1',
-    name: 'Laptop',
-    description: 'High-performance laptop with 16GB RAM',
-    price: 1200,
-    category: 'electronics',
-    inStock: true
-  },
-  {
-    id: '2',
-    name: 'Smartphone',
-    description: 'Latest model with 128GB storage',
-    price: 800,
-    category: 'electronics',
-    inStock: true
-  },
-  {
-    id: '3',
-    name: 'Coffee Maker',
-    description: 'Programmable coffee maker with timer',
-    price: 50,
-    category: 'kitchen',
-    inStock: false
+// Routes
+app.use('/api/products', productRoutes);
+
+// Error handler
+app.use(errorHandler);
+
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
+
+// routes/productRoutes.js
+const express = require('express');
+const router = express.Router();
+const authenticate = require('../middleware/auth');
+const validateProduct = require('../middleware/validateProduct');
+
+let products = [];
+
+router.get('/', (req, res) => {
+  let filtered = [...products];
+
+  if (req.query.search) {
+    filtered = filtered.filter(p =>
+      p.name.toLowerCase().includes(req.query.search.toLowerCase())
+    );
   }
-];
 
-// Root route
-app.get('/', (req, res) => {
-  res.send('Welcome to the Product API! Go to /api/products to see all products.');
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 10;
+  const start = (page - 1) * limit;
+  const end = start + limit;
+
+  res.json(filtered.slice(start, end));
 });
 
-// TODO: Implement the following routes:
-// GET /api/products - Get all products
-// GET /api/products/:id - Get a specific product
-// POST /api/products - Create a new product
-// PUT /api/products/:id - Update a product
-// DELETE /api/products/:id - Delete a product
-
-// Example route implementation for GET /api/products
-app.get('/api/products', (req, res) => {
-  res.json(products);
+router.get('/:id', (req, res) => {
+  const product = products.find(p => p.id === req.params.id);
+  if (!product) return res.status(404).send('Product not found');
+  res.json(product);
 });
 
-// TODO: Implement custom middleware for:
-// - Request logging
-// - Authentication
-// - Error handling
-
-// Start the server
-app.listen(PORT, () => {
-  console.log(`Server is running on http://localhost:${PORT}`);
+router.post('/', authenticate, validateProduct, (req, res) => {
+  const newProduct = { id: Date.now().toString(), ...req.body };
+  products.push(newProduct);
+  res.status(201).json(newProduct);
 });
 
-// Export the app for testing purposes
-module.exports = app; 
+router.put('/:id', authenticate, validateProduct, (req, res) => {
+  const index = products.findIndex(p => p.id === req.params.id);
+  if (index === -1) return res.status(404).send('Product not found');
+  products[index] = { ...products[index], ...req.body };
+  res.json(products[index]);
+});
+
+router.delete('/:id', authenticate, (req, res) => {
+  const index = products.findIndex(p => p.id === req.params.id);
+  if (index === -1) return res.status(404).send('Product not found');
+  const deleted = products.splice(index, 1);
+  res.json(deleted[0]);
+});
+
+module.exports = router;
+
+
+// middleware/logger.js
+module.exports = (req, res, next) => {
+  console.log(`${req.method} ${req.url}`);
+  next();
+};
+
+
+// middleware/auth.js
+module.exports = (req, res, next) => {
+  if (req.headers.token === '12345') {
+    next();
+  } else {
+    res.status(401).send('Unauthorized');
+  }
+};
+
+
+// middleware/validateProduct.js
+module.exports = (req, res, next) => {
+  const { name, price } = req.body;
+  if (!name || typeof price !== 'number') {
+    return res.status(400).send('Invalid product');
+  }
+  next();
+};
+
+
+// middleware/errorHandler.js
+module.exports = (err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).send('Something broke!');
+};
